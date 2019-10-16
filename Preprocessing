@@ -1,0 +1,73 @@
+from nlp_health.preprocessing import excel_to_df
+from nlp_health.preprocessing import normalize
+from nlp_health.feature_generation import text_to_features
+from nlp_health.feature_generation import top_mean_feats
+from nlp_health.feature_generation import top_feats_by_class
+from nlp_health.feature_generation import plot_classfeats_h
+from nlp_health.preprocessing import get_wordcloud
+from nlp_health.preprocessing import one_hot_to_labels
+from nltk import word_tokenize
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+pd.set_option('display.max_colwidth', -1)
+path_to_data = '/home/ziletti/Documents/codes/projects/DS_NLP_Assignment/sentences_with_sentiment.xlsx'
+df_with_dupl = excel_to_df(path_to_data, cols_to_drop=['ID'], preview=False)
+# uncomment to drop rows according to label
+# idx_pos = df['Positive'] == 1
+# idx_neu = df['Neutral'] == 1
+# idx_neg = df['Negative'] == 1
+# df = df.loc[idx_pos + idx_neu + idx_neg].reset_index(drop=True)
+
+df_with_dupl['tok_sentence'] = df_with_dupl['Sentence'].apply(lambda mu: word_tokenize(mu))
+df_with_dupl['norm_sentence_list'] = df_with_dupl['tok_sentence'].apply(lambda mu: normalize(mu))
+df_with_dupl['norm_sentence'] = df_with_dupl['norm_sentence_list'].apply(lambda mu: ' '.join(mu))
+
+# revert the one-hot encoding and add a column with the actual label for easier plotting
+df_with_dupl['y'] = df_with_dupl[['Positive','Negative','Neutral']].apply(one_hot_to_labels, axis=1)
+df_with_dupl = df_with_dupl.drop(['Positive', 'Negative', 'Neutral'], axis=1)
+df_with_dupl[['Sentence', 'tok_sentence', 'norm_sentence', 'y']].head()
+
+y = df_with_dupl['y'].values
+x = df_with_dupl['norm_sentence']
+# count unique rows 
+print("Total rows: {}".format(len(df_with_dupl['norm_sentence'])))
+print("Unique values: {}".format(len(df_with_dupl[['norm_sentence', 'y']].drop_duplicates(keep='first', inplace=False))))
+# before removing duplicates
+df_with_dupl['y'].groupby(df_with_dupl['y']).count().apply(lambda x: x/len(df_with_dupl)*100).apply(lambda x: "{0:.2f}%".format(x))
+
+# drop duplicates from the matrix
+# it is a word around because the drop duplicate function does not
+# word when there are lists in the cells
+df_with_dupl['is_duplicate']= df_with_dupl[['norm_sentence', 'y']].duplicated()
+df_with_dupl = df_with_dupl[df_with_dupl['is_duplicate'] == False]
+df = df_with_dupl.drop('is_duplicate', axis=1).reset_index(drop=True)
+
+# after removing duplicates
+df['y'].groupby(df['y']).count().apply(lambda x: x/len(df)*100).apply(lambda x: "{0:.2f}%".format(x))
+get_wordcloud(df,  target='Positive', show=True)
+get_wordcloud(df,  target='Neutral', show=True)
+get_wordcloud(df,  target='Negative', show=True)
+df_feat_wordcount, _ = text_to_features(x, ngram_range=(1, 4), features=['count'], min_df=0.01, preview=False, verbose=1)
+features = df_feat_wordcount.columns.tolist()
+df_feat_wordcount.head()
+dfs_wordcount = top_feats_by_class(df_feat_wordcount.values, y, features, min_value=0.01, top_n=25)
+plot_classfeats_h(dfs_wordcount, feature_name='Average Count')
+
+df_feat_tfidf, _ = text_to_features(x, ngram_range=(2, 4), features=['tfidf'], min_df=0.01, preview=False, verbose=1)
+features = df_feat_tfidf.columns.tolist()
+df_feat_tfidf.head()
+
+dfs_tfidf = top_feats_by_class(df_feat_tfidf.values, y, features, top_n=5)
+plot_classfeats_h(dfs_tfidf, feature_name='Average TF-IDF per ngram')
+
+df_feat_tfidf.head()
+
+top_n=5
+# sentenced-average tf-idf
+sentenced_avg_tfidf = df_feat_tfidf.mean(axis=1)
+top_sentence_tfidf = sentenced_avg_tfidf.sort_values(ascending=False)[:top_n]
+
+df['sentenced-avg-tfidf'] = df_feat_tfidf.mean(axis=1)
+len(df)
+df[['Sentence', 'sentenced-avg-tfidf', 'y']].iloc[top_sentence_tfidf.index]
